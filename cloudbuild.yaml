@@ -1,0 +1,63 @@
+---
+steps:
+  # Get env from Cloud Storage
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'fetchEnv'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Fetching environment..."
+        gsutil cp gs://${PROJECT_ID}-env/api.env .env
+
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'buildApi'
+    args:
+      [
+        'build',
+        '-t',
+        'us-central1-docker.pkg.dev/$PROJECT_ID/builds/api:latest',
+        '--cache-from',
+        'us-central1-docker.pkg.dev/$PROJECT_ID/builds/api:latest',
+        '--build-arg',
+        'ENV_FILE=.env',
+        '.',
+      ]
+    waitFor: ['fetchEnv']
+
+  # Push the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'pushApi'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/builds/api:latest']
+    waitFor: ['buildApi']
+
+  # Deploy to Cloud Run
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: 'deployApi'
+    entrypoint: gcloud
+    args:
+      [
+        'run',
+        'deploy',
+        'api',
+        '--image',
+        'us-central1-docker.pkg.dev/$PROJECT_ID/builds/api:latest',
+        '--region',
+        'us-central1',
+        '--port',
+        '3000',
+        '--min-instances',
+        '0',
+        '--max-instances',
+        '10',
+        '--allow-unauthenticated',
+      ]
+    waitFor: ['pushApi']
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/builds/api:latest'
+options:
+  logging: CLOUD_LOGGING_ONLY
+  env:
+    - 'CLOUDSDK_CORE_DISABLE_PROMPTS=1'
